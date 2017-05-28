@@ -38,6 +38,10 @@ class pushka extends StaticAnnotation {
       customKeyForFiled(field).fold(field.name.toString)(identity)
     }
 
+    def valueMatcherForFiled(annotations: List[c.Tree]): Option[(String, String)] = annotations collectFirst {
+        case q"""new valueMatcher(${key: String}, ${value: String})""" ⇒ (key, value)
+    }
+
     def caseClassReader(className: TypeName, fields: List[ValDef], annotations: List[c.Tree]) = fields match {
       case field :: Nil if !findAnnotationFlag("forceObject", annotations) ⇒
         if (customKeyForFiled(field).nonEmpty) {
@@ -78,31 +82,43 @@ class pushka extends StaticAnnotation {
         """
     }
 
-    def caseClassWriter(className: TypeName, fields: List[ValDef], annotations: List[c.Tree]) = fields match {
-      case field :: Nil if !findAnnotationFlag("forceObject", annotations) ⇒
-        q"pushka.write(value.${field.name})"
-      case _ ⇒
-        def basicW(field: ValDef) = {
-          val key = keyFromField(field)
-          q"$key -> pushka.write(value.${field.name})"
-        }
-        val writers = fields map { field ⇒
-          val t = field.tpt
-          val n = field.name
-          val w = basicW(field)
-          q"""
-            pushka.HasDefault[$t] match {
-              case Some(default) if !default.writeDefault && value.$n == default.value =>
-                // do nothing
-              case _ => b.append($w)
+    def caseClassWriter(className: TypeName, fields: List[ValDef], annotations: List[c.Tree]) = {
+      fields match {
+        case field :: Nil if !findAnnotationFlag("forceObject", annotations) ⇒
+          q"pushka.write(value.${field.name})"
+        case _ ⇒
+          def basicW(field: ValDef) = {
+            val key = keyFromField(field)
+            q"""$key -> pushka.write(value.${field.name})"""
+          }
+          
+          def annotationW(annotations: List[c.Tree]) = {
+            valueMatcherForFiled(annotations).map { case (key, value) =>
+              q"""b.append($key -> pushka.write($value))"""
+            } toList
+          }
+          
+          val writers = annotationW(annotations) ::: {
+            fields map { field ⇒
+              val t = field.tpt
+              val n = field.name
+              val w = basicW(field)
+              q"""
+              pushka.HasDefault[$t] match {
+                case Some(default) if !default.writeDefault && value.$n == default.value =>
+                  // do nothing
+                case _ => b.append($w)
+              }
+              """
             }
-          """
-        }
-        q"""
+          }
+          
+          q"""
           val b = scala.collection.mutable.Buffer.empty[(String, pushka.Ast)]
           ..$writers
           pushka.Ast.Obj(b.toMap)
         """
+      }
     }
 
     def caseClassRW(className: TypeName, typeParams: List[TypeDef], fields: List[ValDef], annotations: List[c.Tree]) = {

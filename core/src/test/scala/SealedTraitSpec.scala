@@ -1,7 +1,6 @@
 import org.scalatest._
 import pushka._
-import pushka.annotation.pushka
-
+import pushka.annotation.{pushka, valueMatcher}
 import scala.annotation.StaticAnnotation
 
 object SealedTraitSpec {
@@ -47,6 +46,20 @@ object SealedTraitSpec {
       def haha(): Unit = {}
     }
   }
+  
+  @pushka sealed trait TypedJson
+  
+  object TypedJson {
+    @valueMatcher("$type", "login")
+    case class Login(name: String, password: String) extends TypedJson
+    
+    @valueMatcher("$type", "message")
+    case class Message(msg: String) extends TypedJson
+    
+    @valueMatcher("$type", "logout")
+    case object Logout extends TypedJson
+  }
+  
 }
 
 class SealedTraitSpec extends FlatSpec with Matchers {
@@ -98,4 +111,18 @@ class SealedTraitSpec extends FlatSpec with Matchers {
     }
     exception.message should be(s"Error while reading AST $invalidAst to Color")
   }
+  
+  "Case class with @valueMatcher annotation" should "write key and field from valueMatcher" in {
+    write[TypedJson](TypedJson.Login("user", "pass")) should be(
+      Ast.Obj(Map(
+        "login" → Ast.Obj(Map(
+          "$type" → Ast.Str("login"),
+          "name" → Ast.Str("user"),
+          "password" → Ast.Str("pass"
+          ))
+        )
+      ))
+    )
+  }
+  
 }
